@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>光分散 波長 屈折 スペクトル</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-950 text-white min-h-screen p-3">
+<div class="max-w-2xl mx-auto">
+  <h1 class="text-xl font-bold text-center text-yellow-300 mb-1">🌈 光分散・波長・屈折スペクトル</h1>
+  <p class="text-center text-gray-400 text-xs mb-3">コーシーの分散式 n(λ) = A + B/λ² によるプリズム分散シミュレーション</p>
+
+  <div class="grid grid-cols-2 gap-3 mb-3">
+    <div>
+      <label class="text-xs text-gray-400">プリズム角度 (°)</label>
+      <div class="flex items-center gap-2">
+        <input type="range" id="prismAngle" min="30" max="70" value="60" class="w-full" aria-label="プリズム角度">
+        <span id="prismAngleVal" class="text-yellow-400 text-sm w-8">60°</span>
+      </div>
+    </div>
+    <div>
+      <label class="text-xs text-gray-400">入射角 (°)</label>
+      <div class="flex items-center gap-2">
+        <input type="range" id="inciAngle" min="10" max="70" value="45" class="w-full" aria-label="入射角">
+        <span id="inciAngleVal" class="text-yellow-400 text-sm w-8">45°</span>
+      </div>
+    </div>
+    <div class="col-span-2">
+      <label class="text-xs text-gray-400">材質:</label>
+      <div class="flex gap-2 mt-1">
+        <button onclick="setMaterial('glass')" id="mGlass" class="px-3 py-1 rounded text-xs bg-blue-900 border-2 border-blue-400" aria-label="ガラス">ガラス</button>
+        <button onclick="setMaterial('diamond')" id="mDiamond" class="px-3 py-1 rounded text-xs bg-gray-700" aria-label="ダイヤモンド">ダイヤモンド</button>
+        <button onclick="setMaterial('water')" id="mWater" class="px-3 py-1 rounded text-xs bg-gray-700" aria-label="水">水</button>
+      </div>
+    </div>
+  </div>
+
+  <canvas id="prismCanvas" class="block mx-auto rounded-lg border border-gray-800 w-full"
+    width="560" height="380" aria-label="プリズム光分散キャンバス"></canvas>
+
+  <div id="angleTable" class="mt-3 grid grid-cols-7 gap-1 text-center text-xs"></div>
+</div>
+
+<script>
+const canvas = document.getElementById('prismCanvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+// Cauchy constants: {A, B(nm²)}
+const MATERIALS = {
+  glass:   { A:1.5046, B:4200,  name:'ガラス（BK7）' },
+  diamond: { A:2.3780, B:17000, name:'ダイヤモンド' },
+  water:   { A:1.3330, B:3000,  name:'水 (20°C)' },
+};
+let material = 'glass';
+
+function cauchy(A, B, lambdaNm) {
+  // n(λ) = A + B/λ²  (λ in nm, B in nm²)
+  return A + B / (lambdaNm * lambdaNm);
+}
+
+// Convert wavelength to RGB color
+function wavelengthToRGB(nm) {
+  let r,g,b;
+  if(nm>=380&&nm<440){r=(440-nm)/(440-380);g=0;b=1;}
+  else if(nm>=440&&nm<490){r=0;g=(nm-440)/(490-440);b=1;}
+  else if(nm>=490&&nm<510){r=0;g=1;b=(510-nm)/(510-490);}
+  else if(nm>=510&&nm<580){r=(nm-510)/(580-510);g=1;b=0;}
+  else if(nm>=580&&nm<645){r=1;g=(645-nm)/(645-580);b=0;}
+  else if(nm>=645&&nm<=700){r=1;g=0;b=0;}
+  else{r=0;g=0;b=0;}
+  // Intensity factor near UV/IR edges
+  let factor=1;
+  if(nm>=380&&nm<420) factor=0.3+0.7*(nm-380)/40;
+  else if(nm>=680&&nm<=700) factor=0.3+0.7*(700-nm)/20;
+  return `rgba(${Math.round(r*255*factor)},${Math.round(g*255*factor)},${Math.round(b*255*factor)},0.85)`;
+}
+
+function setMaterial(m) {
+  material = m;
+  ['glass','diamond','water'].forEach(k=>{
+    const btn=document.getElementById(`m${k.charAt(0).toUpperCase()+k.slice(1)}`);
+    btn.className=`px-3 py-1 rounded text-xs ${k===m?'bg-blue-900 border-2 border-blue-400':'bg-gray-700'}`;
+  });
+  render();
+}
+
+document.getElementById('prismAngle').addEventListener('input', function(){
+  document.getElementById('prismAngleVal').textContent=this.value+'°';
+  render();
+});
+document.getElementById('inciAngle').addEventListener('input', function(){
+  document.getElementById('inciAngleVal').textContent=this.value+'°';
+  render();
+});
+
+function drawPrism(px, py, pAngleDeg, scale) {
+  // Equilateral-ish prism: apex at top-center
+  const apexAngle = pAngleDeg * Math.PI/180;
+  const halfBase = 80*scale;
+  const h = halfBase/Math.tan(apexAngle/2);
+  // Vertices: apex at (px,py-h), base-left at (px-halfBase,py), base-right at (px+halfBase,py)
+  const apex = {x:px, y:py-h};
+  const bl = {x:px-halfBase, y:py};
+  const br = {x:px+halfBase, y:py};
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(apex.x,apex.y);
+  ctx.lineTo(br.x,br.y);
+  ctx.lineTo(bl.x,bl.y);
+  ctx.closePath();
+  ctx.fillStyle='rgba(150,200,255,0.12)';
+  ctx.fill();
+  ctx.strokeStyle='rgba(150,200,255,0.5)';
+  ctx.lineWidth=1.5;
+  ctx.stroke();
+  ctx.restore();
+  return {apex, bl, br, h, halfBase, apexAngle};
+}
+
+function lineIntersect(x1,y1,x2,y2,x3,y3,x4,y4){
+  const d=(x1-x2)*(y3-y4)-(y1-y2)*(x3-x4);
+  if(Math.abs(d)<1e-10) return null;
+  const t=((x1-x3)*(y3-y4)-(y1-y3)*(x3-x4))/d;
+  return {x:x1+t*(x2-x1),y:y1+t*(y2-y1),t};
+}
+
+function render() {
+  ctx.clearRect(0,0,W,H);
+  // Background
+  ctx.fillStyle='#060a14';
+  ctx.fillRect(0,0,W,H);
+
+  const prismAngleDeg = parseFloat(document.getElementById('prismAngle').value);
+  const inciAngleDeg = parseFloat(document.getElementById('inciAngle').value);
+  const {A, B, name} = MATERIALS[material];
+
+  // Prism geometry
+  const px=220, py=280, scale=1.0;
+  const apexAngle = prismAngleDeg*Math.PI/180;
+  const halfBase=80*scale;
+  const h=halfBase/Math.tan(apexAngle/2);
+  const apex={x:px,y:py-h};
+  const bl={x:px-halfBase,y:py};
+  const br={x:px+halfBase,y:py};
+
+  // Draw prism
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(apex.x,apex.y);
+  ctx.lineTo(br.x,br.y);
+  ctx.lineTo(bl.x,bl.y);
+  ctx.closePath();
+  const prismGrad = ctx.createLinearGradient(bl.x,py,br.x,py);
+  prismGrad.addColorStop(0,'rgba(100,160,255,0.15)');
+  prismGrad.addColorStop(0.5,'rgba(150,200,255,0.25)');
+  prismGrad.addColorStop(1,'rgba(100,160,255,0.15)');
+  ctx.fillStyle=prismGrad;
+  ctx.fill();
+  ctx.strokeStyle='rgba(150,200,255,0.6)';
+  ctx.lineWidth=1.5;
+  ctx.stroke();
+  ctx.restore();
+
+  // Left face normal: from bl to apex
+  const leftFaceVec = {x:apex.x-bl.x, y:apex.y-bl.y};
+  const leftFaceLen = Math.sqrt(leftFaceVec.x**2+leftFaceVec.y**2);
+  const leftNormal = {x:leftFaceVec.y/leftFaceLen, y:-leftFaceVec.x/leftFaceLen}; // inward normal
+
+  // Incident ray from left
+  const inciRad = inciAngleDeg*Math.PI/180;
+  const incDir = {x:Math.cos(inciRad), y:Math.sin(inciRad*0.3)};
+  // Normalize
+  const incLen=Math.sqrt(incDir.x**2+incDir.y**2);
+  incDir.x/=incLen; incDir.y/=incLen;
+
+  // Intersection with left face
+  // Left face: from bl to apex
+  const incStartX=0, incStartY=py-h*0.45;
+  const hit1 = lineIntersect(incStartX,incStartY,incStartX+300,incStartY+300*0.1,bl.x,bl.y,apex.x,apex.y);
+  if(!hit1){render_fallback();return;}
+
+  // Draw incident white ray
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(incStartX, incStartY);
+  ctx.lineTo(hit1.x, hit1.y);
+  ctx.strokeStyle='rgba(255,255,255,0.9)';
+  ctx.lineWidth=2;
+  ctx.stroke();
+  ctx.restore();
+
+  // For each wavelength, compute refraction
+  const wavelengths = [];
+  for(let nm=380;nm<=700;nm+=8) wavelengths.push(nm);
+
+  const tableData=[];
+
+  wavelengths.forEach(nm=>{
+    const n = cauchy(A, B, nm);
+    // Snell's law at entry face
+    // Normal to left face (outward): perpendicular to (apex-bl)
+    const fvx=apex.x-bl.x, fvy=apex.y-bl.y;
+    const fvlen=Math.sqrt(fvx*fvx+fvy*fvy);
+    // Outward normal (pointing left, away from prism)
+    const nx=fvy/fvlen, ny=-fvx/fvlen; // rotated 90°
+    // Actually make it point outward (away from center of prism)
+    const outNx=-ny, outNy=nx; // perpendicular, let's compute properly
+    // Vector from face midpoint toward outside
+    const faceMid={x:(bl.x+apex.x)/2, y:(bl.y+apex.y)/2};
+    const toCenterVec={x:px-faceMid.x, y:py-h/2-faceMid.y};
+    // Face normal pointing away from prism interior
+    let fn1={x:fvy/fvlen, y:-fvx/fvlen};
+    if(fn1.x*toCenterVec.x+fn1.y*toCenterVec.y>0){fn1.x=-fn1.x;fn1.y=-fn1.y;}
+    // Incident direction
+    const idx2=hit1.x-incStartX, idy2=hit1.y-incStartY;
+    const idlen=Math.sqrt(idx2*idx2+idy2*idy2);
+    const id={x:idx2/idlen,y:idy2/idlen};
+    // cos(theta_i) = -dot(id, outward_normal)
+    const cosI = -(id.x*fn1.x+id.y*fn1.y);
+    if(cosI<0){return;}
+    const sinI=Math.sqrt(Math.max(0,1-cosI*cosI));
+    const sinT=sinI/n;
+    if(sinT>1) return;
+    const cosT=Math.sqrt(1-sinT*sinT);
+    // Refracted direction using vector form of Snell's law
+    const rf1={
+      x: id.x/n + fn1.x*(-cosT+cosI/n),
+      y: id.y/n + fn1.y*(-cosT+cosI/n),
+    };
+    const rf1len=Math.sqrt(rf1.x*rf1.x+rf1.y*rf1.y);
+    rf1.x/=rf1len; rf1.y/=rf1len;
+
+    // Find exit point on right face (br to apex)
+    const hit2 = lineIntersect(hit1.x,hit1.y,hit1.x+rf1.x*500,hit1.y+rf1.y*500,apex.x,apex.y,br.x,br.y);
+    if(!hit2||hit2.t<0){return;}
+
+    // Normal to right face
+    const rfvx=br.x-apex.x, rfvy=br.y-apex.y;
+    const rfvlen=Math.sqrt(rfvx*rfvx+rfvy*rfvy);
+    let fn2={x:rfvy/rfvlen, y:-rfvx/rfvlen};
+    const faceMid2={x:(apex.x+br.x)/2,y:(apex.y+br.y)/2};
+    const toCenter2={x:px-faceMid2.x,y:py-h/2-faceMid2.y};
+    if(fn2.x*toCenter2.x+fn2.y*toCenter2.y>0){fn2.x=-fn2.x;fn2.y=-fn2.y;}
+    // Internal ray direction
+    const cosI2=-(rf1.x*fn2.x+rf1.y*fn2.y);
+    const sinI2=Math.sqrt(Math.max(0,1-cosI2*cosI2));
+    const sinT2=sinI2*n; // exiting: n*sinT=sinI
+    if(sinT2>1) return; // TIR
+    const cosT2=Math.sqrt(1-sinT2*sinT2);
+    const rf2={
+      x: rf1.x*n + fn2.x*(-cosT2+cosI2*n),
+      y: rf1.y*n + fn2.y*(-cosT2+cosI2*n),
+    };
+    const rf2len=Math.sqrt(rf2.x*rf2.x+rf2.y*rf2.y);
+    rf2.x/=rf2len; rf2.y/=rf2len;
+
+    const color=wavelengthToRGB(nm);
+    const exitLen=200;
+
+    // Draw internal ray
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(hit1.x,hit1.y);
+    ctx.lineTo(hit2.x,hit2.y);
+    ctx.strokeStyle=color;
+    ctx.lineWidth=1;
+    ctx.globalAlpha=0.5;
+    ctx.stroke();
+    ctx.restore();
+
+    // Draw exit ray
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(hit2.x,hit2.y);
+    ctx.lineTo(hit2.x+rf2.x*exitLen, hit2.y+rf2.y*exitLen);
+    ctx.strokeStyle=color;
+    ctx.lineWidth=1.5;
+    ctx.globalAlpha=0.85;
+    ctx.stroke();
+    ctx.restore();
+
+    if(nm%48===(380%48)){
+      const exitAngle=(Math.atan2(rf2.y,rf2.x)*180/Math.PI).toFixed(1);
+      tableData.push({nm,n:n.toFixed(4),exitAngle,color});
+    }
+  });
+
+  // Labels
+  ctx.save();
+  ctx.fillStyle='rgba(255,255,255,0.7)';
+  ctx.font='11px sans-serif';
+  ctx.fillText('白色光 →',2,incStartY-6);
+  ctx.fillStyle='rgba(150,200,255,0.8)';
+  ctx.fillText(`プリズム ${prismAngleDeg}° (${name})`,bl.x+5,py+16);
+  ctx.restore();
+
+  // Update angle table
+  const table=document.getElementById('angleTable');
+  table.innerHTML=tableData.map(d=>`
+    <div class="rounded p-1" style="background:${d.color};color:#fff;text-shadow:0 0 3px #000">
+      <div class="font-bold">${d.nm}nm</div>
+      <div>n=${d.n}</div>
+      <div>${d.exitAngle}°</div>
+    </div>
+  `).join('');
+}
+
+function render_fallback(){
+  ctx.fillStyle='#999';
+  ctx.font='14px sans-serif';
+  ctx.fillText('パラメータを調整してください',W/2-80,H/2);
+}
+
+render();
+
+// Re-render on slider change already handled by event listeners
+</script>
+</body>
+</html>
